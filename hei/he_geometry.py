@@ -174,8 +174,7 @@ class HoudiniEngineGeometry(object):
 
         mesh_N_attrib_data = _fetchPointAttrib(hapi.attributeOwner.Vertex, "N")
 
-        mesh_uv_attrib_data = _fetchPointAttrib(
-            hapi.attributeOwner.Vertex, "uv")
+    #   mesh_uv_attrib_data = _fetchPointAttrib(hapi.attributeOwner.Vertex, "uv")
 
         # Now that you have all the required mesh data, you can now create
         # a native mesh using your DCC/engine's dedicated functions:"

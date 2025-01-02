@@ -237,7 +237,8 @@ class HoudiniEngineManager(object):
             self.session, asset_names_array[0])
 
         print("  Loaded: {}".format(asset_name))
-        return asset_name
+        node_id = hapi.createNode(self.session, -1, asset_name, "hei_label", False)
+        return node_id
 
     def _waitForCook(self):
         if self.session is None:
@@ -254,12 +255,8 @@ class HoudiniEngineManager(object):
 
         return True
 
-    def createAndCookNode(self, operator_name, node_id):
+    def cookNode(self, node_id):
         '''Instantiate and asynchronously cook the given node'''
-
-        print("\nCreating and cooking node: {}...".format(operator_name))
-        node_id = hapi.createNode(
-            self.session, -1, operator_name, "hexagona_lite", False)
 
         hapi.cookNode(self.session, node_id, self.cook_options)
 
@@ -269,71 +266,32 @@ class HoudiniEngineManager(object):
         return True
 
     def getParameters(self, node_id):
-        '''Query and list the paramters of the given node'''
         node_info = hapi.getNodeInfo(self.session, node_id)
-
-        parm_infos = hapi.getParameters(
-            self.session,
-            node_id,
-            0,
-            node_info.parmCount
-        )
-
-        print("\nParameters: ")
-        print("==========")
+        parm_infos = hapi.getParameters(self.session, node_id, 0, node_info.parmCount)
+        parms = dict()
         for i in range(node_info.parmCount-1):
-            print("  Name: ", end='')
-            print(he_utility.getString(
-                self.session, parm_infos[i].nameSH))
-            print("  Values: (", end='')
-
-            if parm_infos[i].type == hapi.parmType.Int:
-                parm_int_count = parm_infos[i].size
-
-                parm_int_values = hapi.getParmIntValues(
-                    self.session,
-                    node_id,
-                    parm_infos[i].intValuesIndex,
-                    parm_int_count
-                )
-
-                for v in range(parm_int_count):
-                    if v != 0:
-                        print(", ", end='')
-                    print(parm_int_values[v], end='')
+            parm = parm_infos[i]
+            name = he_utility.getString(self.session, parm.nameSH)
+            if parm.type == hapi.parmType.Int:
+                parms[name] = hapi.getParmIntValues(self.session, node_id, parm.intValuesIndex, parm.size) if parm.size > 1 else hapi.getParmIntValue(self.session, node_id, name, 0)
+            if parm.type == hapi.parmType.Toggle:
+                parms[name] = bool(hapi.getParmIntValues(self.session, node_id, parm.intValuesIndex, parm.size) if parm.size > 1 else hapi.getParmIntValue(self.session, node_id, name, 0)) 
             elif parm_infos[i].type == hapi.parmType.Float:
-                parm_float_count = parm_infos[i].size
-
-                parm_float_values = hapi.getParmFloatValues(
-                    self.session,
-                    node_id,
-                    parm_infos[i].floatValuesIndex,
-                    parm_float_count
-                )
-
-                for v in range(parm_float_count):
-                    if v != 0:
-                        print(", ", end='')
-                    print(parm_float_values[v], end='')
+                parms[name] = hapi.getParmFloatValues(self.session, node_id, parm.floatValuesIndex, parm.size) if parm.size > 1 else hapi.getParmFloatValue(self.session, node_id, name, 0)
             elif parm_infos[i].type == hapi.parmType.String:
-                parm_string_count = parm_infos[i].size
+                if parm.size > 1:
+                    handles = hapi.getParmStringValues(self.session, node_id, True, parm.stringValuesIndex, parm.size) 
+                    values = []
+                    for v in range(parm.size):
+                        values += he_utility.getString(self.session, handles[v])
+                    parms[name] = values
+                else:
+                    parms[name] = he_utility.getString(self.session, hapi.getParmStringValue(self.session, node_id, name, 0, True))
+        return parms
 
-                parmSH_values = hapi.getParmStringValues(
-                    self.session,
-                    node_id,
-                    True,
-                    parm_infos[i].stringValuesIndex,
-                    parm_string_count
-                )
-
-                for v in range(parm_string_count):
-                    if v != 0:
-                        print(", ", end='')
-                    print(he_utility.getString(
-                        self.session, parmSH_values[v]), end='')
-            print(")")
-
-        return True
+    def setParameters(self, node_id, parms):
+        for name, value in enumerate(parms):
+            pass
 
     def getAttributes(self, node_id, part_id):
         '''Query and list the point, vertex, prim and detail attributes of the given node'''

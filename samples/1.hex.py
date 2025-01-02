@@ -1,7 +1,20 @@
+
+import os, sys
+# import Python Libs and add Path for the Dll Files 
+# sys.path.append("/opt/hfs20.5.445/houdini/python3.10libs")
+sys.path.append("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\houdini\\python3.10libs")
+os.add_dll_directory("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\bin")
+
+
+
 import numpy as np
 from isaacsim import SimulationApp
 
 simulation_app = SimulationApp({"headless": False})
+
+
+
+
 
 from omni.isaac.core import World
 from omni.isaac.core.objects import DynamicCuboid, VisualCuboid
@@ -9,9 +22,6 @@ from pxr import Gf, Vt, UsdGeom
 
 my_world = World(stage_units_in_meters=1.0)
 
-import os, sys
-# import Python Libs and add Path for the Dll Files 
-sys.path.append("/opt/hfs20.5.445/houdini/python3.10libs")
 import hou
 import hapi
 from hei.he_geometry import HoudiniEngineGeometry
@@ -26,13 +36,12 @@ def launch_hei():
         print("ERROR: Failed to initialize HAPI.")
         return
     otl_path = "{}/hda/hexagona_lite.hda".format(os.getcwd())
-    asset_name = he_manager.loadAsset(otl_path)
-    if asset_name is None:
+    node_id = he_manager.loadAsset(otl_path)
+    if node_id is None:
         print("Failed to load the default HDA.")
         return
-    hexagona_node_id = 0
-    hexagona_part_id = 0
-    hexagona_cook = he_manager.createAndCookNode(asset_name, hexagona_node_id)
+    hexagona_cook = he_manager.cookNode(node_id)
+    he_manager.getParameters(node_id)
 #   he_manager.getAttributes(hexagona_node_id, hexagona_part_id)
     plane_mesh = UsdGeom.Mesh.Define(simulation_app.context.get_stage(), "/proc_mesh")
     points, indices = HoudiniEngineGeometry.readGeometryFromHoudini(he_manager.session, hexagona_node_id, he_manager.cook_options)
