@@ -25,8 +25,6 @@
 import hapi
 
 from enum import Enum
-import hei.he_utility as he_utility
-
 
 class SessionType(Enum):
     InProcess = 1
@@ -116,7 +114,7 @@ class HoudiniEngineManager(object):
             return False
 
         if not self.session:
-            connectionError = he_utility.getConnectionError()
+            connectionError = self.getConnectionError()
             if connectionError:
                 print(
                     "Houdini Engine Session failed to connect - {}".format(connectionError))
@@ -233,8 +231,7 @@ class HoudiniEngineManager(object):
 
         asset_names_array = hapi.getAvailableAssets(
             self.session, asset_library_id, asset_count)
-        asset_name = he_utility.getString(
-            self.session, asset_names_array[0])
+        asset_name = self.getString(asset_names_array[0])
 
         print("  Loaded: {}".format(asset_name))
         node_id = hapi.createNode(self.session, -1, asset_name, "hei_label", False)
@@ -250,7 +247,7 @@ class HoudiniEngineManager(object):
             status = hapi.getStatus(self.session, hapi.statusType.CookState)
 
         if status != hapi.state.Ready:
-            print("Cook failure: {}".format(he_utility.getLastCookError()))
+            print("Cook failure: {}".format(self.getLastCookError()))
             return False
 
         return True
@@ -271,7 +268,7 @@ class HoudiniEngineManager(object):
         parms = dict()
         for i in range(node_info.parmCount-1):
             parm = parm_infos[i]
-            name = he_utility.getString(self.session, parm.nameSH)
+            name = self.getString(parm.nameSH)
             if parm.type == hapi.parmType.Int:
                 parms[name] = hapi.getParmIntValues(self.session, node_id, parm.intValuesIndex, parm.size) if parm.size > 1 else hapi.getParmIntValue(self.session, node_id, name, 0)
             if parm.type == hapi.parmType.Toggle:
@@ -283,15 +280,23 @@ class HoudiniEngineManager(object):
                     handles = hapi.getParmStringValues(self.session, node_id, True, parm.stringValuesIndex, parm.size) 
                     values = []
                     for v in range(parm.size):
-                        values += he_utility.getString(self.session, handles[v])
+                        values += self.getString(handles[v])
                     parms[name] = values
                 else:
-                    parms[name] = he_utility.getString(self.session, hapi.getParmStringValue(self.session, node_id, name, 0, True))
+                    parms[name] = self.getString(hapi.getParmStringValue(self.session, node_id, name, 0, True))
         return parms
 
     def setParameters(self, node_id, parms):
-        for name, value in enumerate(parms):
-            pass
+        for name, value in parms.items():
+            parm_id = hapi.getParmIdFromName(self.session, node_id, name)
+            if isinstance(value, int):
+                hapi.setParmIntValue(self.session, node_id, name, 0, value)
+            elif isinstance(value, bool):
+                hapi.setParmIntValue(self.session, node_id, name, 0, int(value))
+            elif isinstance(value, float):
+                hapi.setParmFloatValue(self.session, node_id, name, 0, value)
+            elif isinstance(value, str):
+                hapi.setParmStringValue(self.session, node_id, value, parm_id, 0)
 
     def getAttributes(self, node_id, part_id):
         '''Query and list the point, vertex, prim and detail attributes of the given node'''
@@ -316,8 +321,7 @@ class HoudiniEngineManager(object):
         print("\n  Point Attributes: {}".format(point_attr_count))
         print("  ----------")
         for i in range(point_attr_count):
-            attr_name = he_utility.getString(
-                self.session, point_attr_nameSH[i])
+            attr_name = self.getString(point_attr_nameSH[i])
             print("  Name: {}".format(attr_name))
 
             attr_info = hapi.getAttributeInfo(
@@ -341,8 +345,7 @@ class HoudiniEngineManager(object):
         print("\n  Vertex Attributes: {}".format(vertex_attr_count))
         print("  ----------")
         for i in range(vertex_attr_count):
-            attr_name = he_utility.getString(
-                self.session, vertex_attr_nameSH[i])
+            attr_name = self.getString(vertex_attr_nameSH[i])
             print("  Name: {}".format(attr_name))
 
             attr_info = hapi.getAttributeInfo(
@@ -365,8 +368,7 @@ class HoudiniEngineManager(object):
         print("\n  Primitive Attributes: {}".format(prim_attr_count))
         print("  ----------")
         for i in range(prim_attr_count):
-            attr_name = he_utility.getString(
-                self.session, prim_attr_nameSH[i])
+            attr_name = self.getString(prim_attr_nameSH[i])
             print("  Name: {}".format(attr_name))
 
             attr_info = hapi.getAttributeInfo(
@@ -389,8 +391,125 @@ class HoudiniEngineManager(object):
         print("\n  Detail Attributes: {}".format(detail_attr_count))
         print("  ----------")
         for i in range(detail_attr_count):
-            attr_name = he_utility.getString(
-                self.session, detail_attr_nameSH[i])
+            attr_name = self.getString(detail_attr_nameSH[i])
             print("  {}".format(attr_name))
 
         return True
+
+    def readGeometry(self, node_id):
+        '''Read mesh data from Houdini for processing'''
+        # Get mesh geo info.
+        print("\nGetting mesh geometry info:")
+        mesh_geo_info = hapi.getDisplayGeoInfo(self.session, node_id)
+
+        # Get mesh part info.
+        mesh_part_info = hapi.getPartInfo(self.session, mesh_geo_info.nodeId, 0)
+
+        # Get mesh face counts.
+        mesh_face_counts = hapi.getFaceCounts(
+            self.session,
+            mesh_geo_info.nodeId,
+            mesh_part_info.id,
+            0, mesh_part_info.faceCount
+        )
+        print("  Face count: {}".format(len(mesh_face_counts)))
+
+        # Get mesh vertex list.
+        mesh_vertex_list = hapi.getVertexList(
+            self.session,
+            mesh_geo_info.nodeId,
+            mesh_part_info.id,
+            0, mesh_part_info.vertexCount
+        )
+
+        print("  Vertex count: {}".format(len(mesh_vertex_list)))
+
+        # Fetch mesh attributes of the given name
+        def _fetchPointAttrib(owner, attrib_name):
+            mesh_attrib_info = hapi.getAttributeInfo(
+                self.session,
+                mesh_geo_info.nodeId,
+                mesh_part_info.id,
+                attrib_name, owner
+            )
+
+            mesh_attrib_data = hapi.getAttributeFloatData(
+                self.session,
+                mesh_geo_info.nodeId,
+                mesh_part_info.id,
+                attrib_name,
+                mesh_attrib_info, -1,
+                0, mesh_attrib_info.count
+            )
+
+            print("  {} attribute count: {}".format(
+                attrib_name, len(mesh_attrib_data)))
+            return mesh_attrib_data
+
+        mesh_p_attrib_info = _fetchPointAttrib(hapi.attributeOwner.Point, "P")
+
+        mesh_cd_attrib_data = _fetchPointAttrib(
+            hapi.attributeOwner.Point, "Cd")
+
+        mesh_N_attrib_data = _fetchPointAttrib(hapi.attributeOwner.Vertex, "N")
+
+    #   mesh_uv_attrib_data = _fetchPointAttrib(hapi.attributeOwner.Vertex, "uv")
+
+        # Now that you have all the required mesh data, you can now create
+        # a native mesh using your DCC/engine's dedicated functions:"
+        # ...
+
+        return mesh_p_attrib_info, mesh_vertex_list
+
+    def getLastError(self):
+        '''Helper method to retrieve the last error message'''
+        buffer_length = hapi.getStatusStringBufLength(
+            self.session,
+            hapi.statusType.CallResult,
+            hapi.statusVerbosity.Errors)
+
+        if buffer_length <= 1:
+            return ""
+
+        string_val = hapi.getStatusString(
+            self.session, hapi.statusType.CallResult, buffer_length)
+
+        return string_val
+
+    def getLastCookError(self):
+        '''Helper method to retrieve the last cook error message'''
+        buffer_length = 0
+        buffer_length = hapi.getStatusStringBufLength(
+            self.session,
+            hapi.statusType.CookResult,
+            hapi.statusVerbosity.Errors)
+
+        if buffer_length <= 1:
+            return ""
+
+        string_val = hapi.getStatusString(
+            self.session, hapi.statusType.CookResult, buffer_length)
+
+        return string_val
+
+    def getConnectionError(self):
+        '''Helper method to retrieve the last connection error message'''
+        buffer_length = hapi.getConnectionErrorLength()
+
+        if buffer_length <= 1:
+            return ""
+
+        string_val = hapi.getConnectionError(buffer_length, True)
+        return string_val
+
+    def getString(self, string_handle):
+        '''Helper method to retrieve a string from a HAPI_StringHandle'''
+        buffer_length = hapi.getStringBufLength(self.session, string_handle)
+
+        string_val = hapi.getString(self.session, string_handle, buffer_length)
+        return string_val
+
+    def saveToHip(self, filename):
+        '''Save the session to a .hip file in the application directory'''
+        success = hapi.saveHIPFile(self.session, filename, False)
+        return success
