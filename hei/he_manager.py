@@ -266,7 +266,7 @@ class HoudiniEngineManager(object):
         node_info = hapi.getNodeInfo(self.session, node_id)
         parm_infos = hapi.getParameters(self.session, node_id, 0, node_info.parmCount)
         parms = dict()
-        for i in range(node_info.parmCount-1):
+        for i in range(node_info.parmCount):
             parm = parm_infos[i]
             name = self.getString(parm.nameSH)
             if parm.type == hapi.parmType.Int:
