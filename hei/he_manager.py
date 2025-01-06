@@ -253,14 +253,17 @@ class HoudiniEngineManager(object):
         return True
 
     def cookNode(self, node_id):
-        '''Instantiate and asynchronously cook the given node'''
-
-        hapi.cookNode(self.session, node_id, self.cook_options)
-
-        if self._waitForCook():
-            print("Cook complete.")
-
-        return True
+        '''cook node_id directly can only cook the first output even set cook_options.preferOutputNodes to True'''
+        #hapi.cookNode(self.session, node_id, self.cook_options)
+        #self._waitForCook()
+        node_info = hapi.getNodeInfo(self.session, node_id)
+        outputs = []
+        for i in range(node_info.outputCount):
+            output = hapi.getOutputNodeId(self.session, node_id, i)
+            outputs +=[output]
+            hapi.cookNode(self.session, output, self.cook_options)
+            self._waitForCook()
+        return outputs
 
     def getParameters(self, node_id):
         node_info = hapi.getNodeInfo(self.session, node_id)
@@ -298,8 +301,9 @@ class HoudiniEngineManager(object):
             elif isinstance(value, str):
                 hapi.setParmStringValue(self.session, node_id, value, parm_id, 0)
 
-    def getAttributes(self, node_id, part_id):
+    def getAttributes(self, node_id):
         '''Query and list the point, vertex, prim and detail attributes of the given node'''
+        part_id = 0
         part_info = hapi.getPartInfo(self.session, node_id, part_id)
 
         vertex_attr_count = part_info.attributeCounts[hapi.attributeOwner.Vertex]
@@ -395,6 +399,33 @@ class HoudiniEngineManager(object):
             print("  {}".format(attr_name))
 
         return True
+
+    def readPoints(self, node_id):
+        part_id = 0
+        part_info = hapi.getPartInfo(self.session, node_id, part_id)
+        point_attr_count = part_info.attributeCounts[hapi.attributeOwner.Point]
+        point_attr_nameSH = hapi.getAttributeNames(self.session, node_id, part_id, hapi.attributeOwner.Point, point_attr_count)
+        attribs = dict()
+        for i in range(point_attr_count):
+            attr_name = self.getString(point_attr_nameSH[i])
+            attr_info = hapi.getAttributeInfo(self.session, node_id, part_id, attr_name, hapi.attributeOwner.Point,)
+            if attr_info.storage == hapi.storageType.Int:
+                values = []
+                for v in range(attr_info.count):
+                    values +=[hapi.getAttributeIntData(self.session, node_id, part_id, attr_name, attr_info, -1, 0, attr_info.count)]
+                attribs[attr_name] = values
+            elif attr_info.storage == hapi.storageType.Float:
+                values = []
+                for v in range(attr_info.count):
+                    values +=[hapi.getAttributeFloatData(self.session, node_id, part_id, attr_name, attr_info, -1, v, 1)]
+                attribs[attr_name] = values
+            elif attr_info.storage == hapi.storageType.String:
+                handles = hapi.getAttributeStringData(self.session, node_id, part_id, attr_name, attr_info, 0, attr_info.count) 
+                values = []
+                for v in range(attr_info.count):
+                    values += [self.getString(handles[v])]
+                attribs[attr_name] = values
+        return attribs
 
     def readGeometry(self, node_id):
         '''Read mesh data from Houdini for processing'''
