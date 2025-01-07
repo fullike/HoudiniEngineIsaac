@@ -241,9 +241,8 @@ class HoudiniEngineManager(object):
         if self.session is None:
             return False
 
-        status = status = hapi.getStatus(
-            self.session, hapi.statusType.CookState)
-        while (status > hapi.state.Ready):
+        status = status = hapi.getStatus(self.session, hapi.statusType.CookState)
+        while (status in [hapi.state.StartingCook, hapi.state.Cooking]):
             status = hapi.getStatus(self.session, hapi.statusType.CookState)
 
         if status != hapi.state.Ready:
@@ -412,8 +411,16 @@ class HoudiniEngineManager(object):
             if attr_info.storage == hapi.storageType.Int:
                 values = []
                 for v in range(attr_info.count):
-                    values +=[hapi.getAttributeIntData(self.session, node_id, part_id, attr_name, attr_info, -1, 0, attr_info.count)]
+                    values +=[hapi.getAttributeIntData(self.session, node_id, part_id, attr_name, attr_info, -1, v, 1)]
                 attribs[attr_name] = values
+            elif attr_info.storage == hapi.storageType.IntArray:
+                data, counts = hapi.getAttributeIntArrayData(self.session, node_id, part_id, attr_name, attr_info, attr_info.totalArrayElements, 0, attr_info.count)
+                values = []
+                start = 0
+                for v in range(attr_info.count):
+                    values +=[data[start:start+counts[v]]]
+                    start +=counts[v]
+                attribs[attr_name] = values                
             elif attr_info.storage == hapi.storageType.Float:
                 values = []
                 for v in range(attr_info.count):

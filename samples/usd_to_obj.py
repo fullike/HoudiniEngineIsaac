@@ -4,7 +4,7 @@ simulation_app = SimulationApp({"headless": True})
 from pxr import Gf, Vt, Usd, UsdGeom
 from typing import List, Type
 
-stage_ref = Usd.Stage.Open('d:/4.2/Isaac/Props/Sektion_Cabinet/sektion_cabinet_instanceable.usd')
+stage_ref = Usd.Stage.Open('/media/jay/data/4.2/Isaac/Props/Sektion_Cabinet/sektion_cabinet_instanceable.usd')
 stage_ref.GetRootLayer().Export('scene.usda')
 
 layer_name = stage_ref.GetRootLayer().GetDisplayName().rsplit('.', 1)[0]

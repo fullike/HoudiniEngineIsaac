@@ -1,15 +1,15 @@
 
 import os, sys
 # import Python Libs and add Path for the Dll Files 
-#sys.path.append("/opt/hfs20.5.445/houdini/python3.10libs")
-sys.path.append("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\houdini\\python3.10libs")
-os.add_dll_directory("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\bin")
+sys.path.append("/opt/hfs20.5.445/houdini/python3.10libs")
+#sys.path.append("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\houdini\\python3.10libs")
+#os.add_dll_directory("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\bin")
 
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": True})
 from omni.isaac.core import World
 from omni.isaac.core.objects import DynamicCuboid, VisualCuboid
-from pxr import Gf, Vt, Usd, UsdGeom
+from pxr import Gf, Vt, Usd, UsdGeom, UsdPhysics
 
 import hou
 import hapi
@@ -29,7 +29,7 @@ def main():
         print("Failed to load the default HDA.")
         return
     parms = he_manager.getParameters(node_id)
-#   he_manager.setParameters(node_id, {"rounded_tile":False})
+    he_manager.setParameters(node_id, {"Width":1.5})
     outputs = he_manager.cookNode(node_id)
 
 #   he_manager.getAttributes(outputs[0])
@@ -42,12 +42,27 @@ def main():
 
     # Create a tempory stage in memory
     stage = Usd.Stage.CreateInMemory('SampleLayer.usd')
-
-    xformPrim = UsdGeom.Xform.Define(stage, '/cabinet')
+    stage.DefinePrim('/cabinet', 'Xform')
     for i in range(num_bodies):
         name = bodies["name"][i]
-        prim = Usd.Prim.Define(stage, f'/cabinet/{name}')
-        prim.GetReferences().AddReference('./sektion_cabinet_visuals.usd', f'/{name}_visuals')
+        prim_name = f'{name}_{i}'
+        prim = stage.DefinePrim(f'/cabinet/{prim_name}', 'Xform')
+        visual = stage.DefinePrim(f'/cabinet/{prim_name}/visuals')
+        collision = stage.DefinePrim(f'/cabinet/{prim_name}/collisions')
+        visual.GetReferences().AddReference('./sektion_cabinet_visuals.usd', f'/{name}_visuals')
+        collision.GetReferences().AddReference('./sektion_cabinet_collisions.usd', f'/{name}_collisions')
+    for i in range(num_joints):
+        name = joints["name"][i]
+        body_index = joints["bodies"][i][0]
+        parent_name = f'{bodies["name"][body_index]}_{body_index}'
+        joint_name = f'/cabinet/{parent_name}/{name}_{i}'
+        if name == "Revolute":
+            joint = UsdPhysics.RevoluteJoint.Define(stage, joint_name)
+        elif name == "Prismatic":
+            joint = UsdPhysics.PrismaticJoint.Define(stage, joint_name)
+        elif name == "Fixed":
+            joint = UsdPhysics.FixedJoint.Define(stage, joint_name)
+
 
     # Save the resulting layer
     stage.GetRootLayer().Export('SampleLayer.usda')
