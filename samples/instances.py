@@ -1,21 +1,28 @@
 
 import os, sys
 # import Python Libs and add Path for the Dll Files 
-sys.path.append("/opt/hfs20.5.445/houdini/python3.10libs")
-#sys.path.append("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\houdini\\python3.10libs")
-#os.add_dll_directory("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\bin")
+#sys.path.append("/opt/hfs20.5.445/houdini/python3.10libs")
+sys.path.append("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\houdini\\python3.10libs")
+os.add_dll_directory("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\bin")
 
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": False})
+from omni.isaac.core import World
+from omni.isaac.core.articulations import Articulation
 import omni.isaac.core.utils.stage as stage_utils
 import omni.ui as ui
+import numpy as np
 from pxr import Gf, Vt, Usd, UsdGeom, UsdPhysics
 import hou
 import hapi
 from hei.he_manager import HoudiniEngineManager
+
+my_world = World(stage_units_in_meters=1.0)
+my_world.scene.add_default_ground_plane()
+
 my_window = ui.Window("My Extension's Window", width=400, height=400, dockPreference=ui.DockPreference.RIGHT_BOTTOM)
 my_window.deferred_dock_in("Property", ui.DockPolicy.TARGET_WINDOW_IS_ACTIVE)
-
+num_env = 0
 def main():
     he_manager = HoudiniEngineManager()
     if not he_manager.startSession(1, he_manager.DEFAULT_NAMED_PIPE, he_manager.DEFAULT_TCP_PORT):
@@ -34,6 +41,7 @@ def main():
 
 
     def cookNode():
+        global num_env
         outputs = he_manager.cookNode(node_id)
     #   he_manager.getAttributes(outputs[0])
     #   he_manager.getAttributes(outputs[1])
@@ -44,7 +52,8 @@ def main():
         num_joints = len(joints["P"])
 
         # Create a tempory stage in memory
-        stage = Usd.Stage.CreateInMemory('SampleLayer.usda')
+        usd_name = f'cabinet_{num_env}.usda'
+        stage = Usd.Stage.CreateInMemory(usd_name)
         UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
 
         stage.DefinePrim('/cabinet', 'Xform')
@@ -79,8 +88,11 @@ def main():
                 joint = UsdPhysics.FixedJoint.Define(stage, joint_name)
 
         # Save the resulting layer
-        stage.GetRootLayer().Export('SampleLayer.usda')
-        stage_utils.open_stage('SampleLayer.usda')
+        stage.GetRootLayer().defaultPrim = "cabinet"
+        stage.GetRootLayer().Export(usd_name)
+        stage_utils.add_reference_to_stage(usd_name, f'/World/env_{num_env}')
+        prim = Articulation(prim_path=f'/World/env_{num_env}', name="env", position=np.array([num_env*2, 0, 0.5]))
+        num_env +=1
 
     with my_window.frame:
         ui.Button("Cook", clicked_fn=cookNode)
