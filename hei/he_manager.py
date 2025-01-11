@@ -237,6 +237,10 @@ class HoudiniEngineManager(object):
         node_id = hapi.createNode(self.session, -1, asset_name, "hei_label", False)
         return node_id
 
+    def unloadAsset(self, node_id):
+        hapi.deleteNode(self.session, node_id)
+        hapi.cleanup()
+
     def _waitForCook(self):
         if self.session is None:
             return False
