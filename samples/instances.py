@@ -79,15 +79,21 @@ def main():
 
         for i in range(num_joints):
             name = joints["name"][i]
-            body_index = joints["bodies"][i][0]
-            parent_name = f'{bodies["name"][body_index]}_{body_index}'
-            joint_name = f'/cabinet/{parent_name}/{name}_{i}'
+            body_index_0 = joints["bodies"][i][0]
+            body_index_1 = joints["bodies"][i][1]
+            body_name_0 = f'{bodies["name"][body_index_0]}_{body_index_0}'
+            body_name_1 = f'{bodies["name"][body_index_1]}_{body_index_1}'
+            joint_name = f'/cabinet/{body_name_0}/{name}_{i}'
             if name == "Revolute":
                 joint = UsdPhysics.RevoluteJoint.Define(stage, joint_name)
             elif name == "Prismatic":
                 joint = UsdPhysics.PrismaticJoint.Define(stage, joint_name)
             elif name == "Fixed":
                 joint = UsdPhysics.FixedJoint.Define(stage, joint_name)
+            rel_0 = joint.CreateBody0Rel()
+            rel_1 = joint.CreateBody1Rel()
+            rel_0.AddTarget(f'/cabinet/{body_name_0}')
+            rel_1.AddTarget(f'/cabinet/{body_name_1}')
 
         # Save the resulting layer
         stage.GetRootLayer().defaultPrim = "cabinet"
