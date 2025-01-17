@@ -23,6 +23,7 @@
 # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import hapi
+import sys
 
 from enum import Enum
 
@@ -234,7 +235,10 @@ class HoudiniEngineManager(object):
         asset_name = self.getString(asset_names_array[0])
 
         print("  Loaded: {}".format(asset_name))
+        hapi.pythonThreadInterpreterLock(self.session, False)
         node_id = hapi.createNode(self.session, -1, asset_name, "hei_label", False)
+        status = hapi.getStatus(self.session, hapi.statusType.CallResult)
+        hapi.pythonThreadInterpreterLock(self.session, True)
         return node_id
 
     def unloadAsset(self, node_id):
@@ -264,8 +268,15 @@ class HoudiniEngineManager(object):
         for i in range(node_info.outputCount):
             output = hapi.getOutputNodeId(self.session, node_id, i)
             outputs +=[output]
+            print(f'1 gil status {sys.getswitchinterval()}')
+            hapi.pythonThreadInterpreterLock(self.session, False)
+            print(f'2 gil status {sys.getswitchinterval()}')
             hapi.cookNode(self.session, output, self.cook_options)
-            self._waitForCook()
+            print(f'3 gil status {sys.getswitchinterval()}')    
+            status = hapi.getStatus(self.session, hapi.statusType.CookState)
+            print(f'4 gil status {sys.getswitchinterval()}')    
+            hapi.pythonThreadInterpreterLock(self.session, True)
+            print(f'5 gil status {sys.getswitchinterval()}')    
         return outputs
 
     def getParameters(self, node_id):

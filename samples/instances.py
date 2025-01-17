@@ -12,7 +12,7 @@ from omni.isaac.core.articulations import Articulation
 import omni.isaac.core.utils.stage as stage_utils
 import omni.ui as ui
 import numpy as np
-from pxr import Gf, Vt, Usd, UsdGeom, UsdPhysics
+from pxr import Gf, Vt, Usd, UsdGeom, UsdPhysics, PhysxSchema
 import hou
 import hapi
 from hei.he_manager import HoudiniEngineManager
@@ -40,8 +40,10 @@ def main():
             print("Failed to load the default HDA.")
             return
         parms = he_manager.getParameters(node_id)
+        print("Ready to set parameters")        
         he_manager.setParameters(node_id, {"Width":1.5})
-
+        print("Ready to cook")
+        
         outputs = he_manager.cookNode(node_id)
     #   he_manager.getAttributes(outputs[0])
     #   he_manager.getAttributes(outputs[1])
@@ -63,9 +65,13 @@ def main():
             scale = bodies["scale"][i]
             prim_name = f'{name}_{i}'
             prim = stage.DefinePrim(f'/cabinet/{prim_name}', 'Xform')
+            UsdPhysics.RigidBodyAPI.Apply(prim)
+            UsdPhysics.MassAPI.Apply(prim)
+
             UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d(pos[2], pos[0], pos[1]))
             UsdGeom.Xformable(prim).AddRotateXYZOp().Set(Gf.Vec3d(0, 0, 0))
             UsdGeom.Xformable(prim).AddScaleOp().Set(Gf.Vec3d(scale[2], scale[0], scale[1]))
+            matrix = UsdGeom.Xformable(prim).GetLocalTransformation()
 
         #   xform_api = UsdGeom.XformCommonAPI(prim)
         #   xform_api.SetTranslate(Gf.Vec3d(0, 0, 0))
@@ -81,19 +87,33 @@ def main():
             name = joints["name"][i]
             body_index_0 = joints["bodies"][i][0]
             body_index_1 = joints["bodies"][i][1]
-            body_name_0 = f'{bodies["name"][body_index_0]}_{body_index_0}'
-            body_name_1 = f'{bodies["name"][body_index_1]}_{body_index_1}'
-            joint_name = f'/cabinet/{body_name_0}/{name}_{i}'
+            if body_index_0 >= 0:
+                body_name_0 = f'/{bodies["name"][body_index_0]}_{body_index_0}'
+                body_pos_0 = bodies["P"][body_index_0]
+            else:
+                body_name_0 = ''
+            if body_index_1 >= 0:
+                body_name_1 = f'/{bodies["name"][body_index_1]}_{body_index_1}'
+                body_pos_1 = bodies["P"][body_index_1]
+            else:
+                body_name_1 = ''
+            joint_name = f'/cabinet{body_name_0}/{name}_{i}'
             if name == "Revolute":
                 joint = UsdPhysics.RevoluteJoint.Define(stage, joint_name)
             elif name == "Prismatic":
                 joint = UsdPhysics.PrismaticJoint.Define(stage, joint_name)
             elif name == "Fixed":
                 joint = UsdPhysics.FixedJoint.Define(stage, joint_name)
-            rel_0 = joint.CreateBody0Rel()
-            rel_1 = joint.CreateBody1Rel()
-            rel_0.AddTarget(f'/cabinet/{body_name_0}')
-            rel_1.AddTarget(f'/cabinet/{body_name_1}')
+            if body_index_0 >= 0:
+                mat_0 = UsdGeom.Xformable(stage.GetPrimAtPath(f'/cabinet{body_name_0}')).GetLocalTransformation().GetInverse()
+                rel_0 = joint.CreateBody0Rel()
+                rel_0.AddTarget(f'/cabinet{body_name_0}')
+                joint.GetLocalPos0Attr().Set(mat_0.Transform(Gf.Vec3d(body_pos_1[2], body_pos_1[0], body_pos_1[1])))
+            if body_index_1 >= 0:
+                mat_1 = UsdGeom.Xformable(stage.GetPrimAtPath(f'/cabinet{body_name_1}')).GetLocalTransformation().GetInverse()
+                rel_1 = joint.CreateBody1Rel()
+                rel_1.AddTarget(f'/cabinet{body_name_1}')
+                joint.GetLocalPos1Attr().Set(mat_1.Transform(Gf.Vec3d(body_pos_1[2], body_pos_1[0], body_pos_1[1])))
 
         # Save the resulting layer
         stage.GetRootLayer().defaultPrim = "cabinet"
