@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2023, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2021-2024, NVIDIA CORPORATION. All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
@@ -15,11 +15,11 @@ import carb
 import numpy as np
 import omni.appwindow  # Contains handle to keyboard
 import omni.replicator.core as rep
-from omni.isaac.core import World
-from omni.isaac.core.utils.prims import define_prim, get_prim_at_path
-from omni.isaac.sensor import Camera
-from omni.isaac.nucleus import get_assets_root_path
-from omni.isaac.quadruped.robots import AnymalFlatTerrainPolicy
+from isaacsim.core.api import World
+from isaacsim.sensors.camera import Camera
+from isaacsim.core.utils.prims import define_prim, get_prim_at_path
+from isaacsim.robot.policy.examples.robots import AnymalFlatTerrainPolicy
+from isaacsim.storage.native import get_assets_root_path
 
 
 class Anymal_runner(object):
@@ -34,7 +34,7 @@ class Anymal_runner(object):
         """
         self._world = World(stage_units_in_meters=1.0, physics_dt=physics_dt, rendering_dt=render_dt)
 
-        assets_root_path = "/media/jay/data/4.2"#get_assets_root_path()
+        assets_root_path = get_assets_root_path()
         if assets_root_path is None:
             carb.log_error("Could not find Isaac Sim assets folder")
 
@@ -49,24 +49,61 @@ class Anymal_runner(object):
             usd_path=assets_root_path + "/Isaac/Robots/ANYbotics/anymal_c.usd",
             position=np.array([0, 0, 0.7]),
         )
-        self._camera = self._world.scene.add(Camera(
+        camera = Camera(
                     prim_path="/World/Anymal/depth_camera_front_camera/Camera",
-                    position=np.array([0, 0, 2]),
+                    translation=np.array([0, 0, 0.1]),
                     name="camera1",
                     frequency=20,
                     resolution=(256, 256), 
-                ))
+                )
+        camera.initialize()
+        self._camera = self._world.scene.add(camera)
+        # Given the OpenCV camera matrix and distortion coefficients (Rational Polynomial model),
+        # creates a camera and a sample scene, renders an image and saves it to
+        # camera_opencv_fisheye.png file. The asset is also saved to camera_opencv_fisheye.usd file.
+        width, height = 1920, 1200
+        camera_matrix = [[958.8, 0.0, 957.8], [0.0, 956.7, 589.5], [0.0, 0.0, 1.0]]
+        distortion_coefficients = [0.14, -0.03, -0.0002, -0.00003, 0.009, 0.5, -0.07, 0.017]
+
+        # Camera sensor size and optical path parameters. These parameters are not the part of the
+        # OpenCV camera model, but they are nessesary to simulate the depth of field effect.
+        #
+        # To disable the depth of field effect, set the f_stop to 0.0. This is useful for debugging.
+        pixel_size = 3  # in microns, 3 microns is common
+        f_stop = 1.8  # f-number, the ratio of the lens focal length to the diameter of the entrance pupil
+        focus_distance = 0.6  # in meters, the distance from the camera to the object plane
+        diagonal_fov = 140  # in degrees, the diagonal field of view to be rendered
+
+        ((fx, _, cx), (_, fy, cy), (_, _, _)) = camera_matrix
+        horizontal_aperture = pixel_size * 1e-3 * width
+        vertical_aperture = pixel_size * 1e-3 * height
+        focal_length_x = fx * pixel_size * 1e-3
+        focal_length_y = fy * pixel_size * 1e-3
+        focal_length = (focal_length_x + focal_length_y) / 2  # in mm
+
+        # Set the camera parameters, note the unit conversion between Isaac Sim sensor and Kit
+        camera.set_focal_length(focal_length / 10.0)
+        camera.set_focus_distance(focus_distance)
+        camera.set_lens_aperture(f_stop * 100.0)
+        camera.set_horizontal_aperture(horizontal_aperture / 10.0)
+        camera.set_vertical_aperture(vertical_aperture / 10.0)
+
+        camera.set_clipping_range(0.05, 1.0e5)
+
+        # Set the distortion coefficients
+        camera.set_projection_type("fisheyePolynomial")
+        camera.set_rational_polynomial_properties(width, height, cx, cy, diagonal_fov, distortion_coefficients)
 
         render_product = rep.create.render_product("/World/Anymal/depth_camera_front_camera/Camera", (1024, 1024))
-        # basic_writer = rep.WriterRegistry.get("BasicWriter")
-        # basic_writer.initialize(
-        #     output_dir=f"~/replicator_examples/multi_render_product/basic",
-        #     rgb=True,
-        #     distance_to_camera=True,
-        #     colorize_depth=True,
-        # )
-        # Attach render_product to the writer
-        #basic_writer.attach([render_product])
+        basic_writer = rep.WriterRegistry.get("BasicWriter")
+        basic_writer.initialize(
+            output_dir=f"./output",
+            rgb=True,
+            distance_to_camera=True,
+            colorize_depth=True,
+        )
+        #Attach render_product to the writer
+        basic_writer.attach([render_product])
 
         self._base_command = np.zeros(3)
 
@@ -106,11 +143,11 @@ class Anymal_runner(object):
         self._gamepad = self._appwindow.get_gamepad(0)
         self._sub_keyboard = self._input.subscribe_to_keyboard_events(self._keyboard, self._sub_keyboard_event)
         self._sub_gamepad = self._input.subscribe_to_gamepad_events(self._gamepad, self._sub_gamepad_event)
-        self._world.add_physics_callback("anymal_advance", callback_fn=self.on_physics_step)
+        self._world.add_physics_callback("anymal_forward", callback_fn=self.on_physics_step)
 
     def on_physics_step(self, step_size) -> None:
         """
-        Physics call back, initialize robot (first frame) and call robot advance function to compute and apply joint torque
+        Physics call back, initialize robot (first frame) and call controller forward function to compute and apply joint torque
 
         """
         if self.first_step:
@@ -121,7 +158,7 @@ class Anymal_runner(object):
             self.needs_reset = False
             self.first_step = True
         else:
-            self._anymal.advance(step_size, self._base_command)
+            self._anymal.forward(step_size, self._base_command)
 
     def run(self) -> None:
         """
@@ -184,9 +221,9 @@ def main():
 
     runner = Anymal_runner(physics_dt=physics_dt, render_dt=render_dt)
     simulation_app.update()
-    runner.setup()
-    simulation_app.update()
     runner._world.reset()
+    simulation_app.update()
+    runner.setup()
     simulation_app.update()
     runner.run()
     simulation_app.close()
