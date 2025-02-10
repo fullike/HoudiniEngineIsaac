@@ -7,15 +7,55 @@ os.add_dll_directory("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445
 
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": False})
-from omni.isaac.core import World
-from omni.isaac.core.articulations import Articulation
-import omni.isaac.core.utils.stage as stage_utils
+
+from isaacsim.core.api import World
+from isaacsim.core.prims import Articulation
+from isaacsim.core.utils.stage import add_reference_to_stage, open_stage
+
 import omni.ui as ui
 import numpy as np
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, PhysxSchema
 import hou
 import hapi
 from hei.he_manager import HoudiniEngineManager
+
+class DynamicComboBoxItem(ui.AbstractItem):
+    def __init__(self, text):
+        super().__init__()
+        self.model = ui.SimpleStringModel(text)
+
+
+class DynamicComboBoxModel(ui.AbstractItemModel):
+    def __init__(self, args):
+        super().__init__()
+
+        self._current_index = ui.SimpleIntModel()
+        self._current_index.add_value_changed_fn(lambda a: self._item_changed(None))
+        self._items = []
+        for i in range(len(args)):
+            self._items.append(DynamicComboBoxItem(args[i]))
+
+    def get_item_children(self, item):
+        return self._items if item is None else []
+
+    def get_item_value_model_count(self, item):
+        """The number of columns"""
+        return 1
+
+    def get_item_value_model(self, item: ui.AbstractItem = None, column_id: int = 0):
+        if item is None:
+            return self._current_index
+        return item.model
+
+    def set_item_value_model(self, item: ui.AbstractItem = None, column_id: int = 0):
+        self._current_index = item
+        self._item_changed(None)
+        self._current_index.add_value_changed_fn(lambda a: self._item_changed(None))
+
+
+
+
+
 
 my_world = World(stage_units_in_meters=1.0)
 my_world.scene.add_default_ground_plane()
@@ -132,15 +172,58 @@ def main():
         # Save the resulting layer
         stage.GetRootLayer().defaultPrim = "cabinet"
         stage.GetRootLayer().Export(usd_name)
-        stage_utils.open_stage(usd_name)
-    #   stage_utils.add_reference_to_stage(usd_name, f'/World/env_{num_env}')
+        open_stage(usd_name)
+    #   add_reference_to_stage(usd_name, f'/World/env_{num_env}')
     #   prim = Articulation(prim_path=f'/World/env_{num_env}', name="env", position=np.array([num_env*2, 0, 0.5]))
     #   num_env +=1
 
         he_manager.unloadAsset(node_id)
 
+
+    def on_file_changed(hda_path):
+        global node_id
+        node_id = he_manager.loadAsset(hda_path)
+        if node_id is None:
+            print("Failed to load the default HDA.")
+            return
+        parms = he_manager.getParameters(node_id)
+    def on_pick_file():
+        from omni.kit.window.filepicker import FilePickerDialog
+
+        # async def on_click_handler(filename: str, dirname: str, dialog: FilePickerDialog, click_fn: Callable):
+        #     dirname = dirname.strip()
+        #     if filename and dirname and not dirname.endswith("/"):
+        #         dirname += "/"
+        #     fullpath = f"{dirname}{filename}"
+        #     if click_fn:
+        #         click_fn(fullpath)
+        #     dialog.hide()
+        def on_apply(dialog, dirname, filename):
+            on_file_changed(dirname + filename)
+            dialog.hide()
+
+        dialog = FilePickerDialog(
+            "Select HDA File",
+            allow_multi_selection=False,
+            apply_button_label="Select",
+            click_apply_handler=lambda filename, dirname:on_apply(dialog, dirname, filename),
+            click_cancel_handler=lambda filename, dirname: dialog.hide())
     with my_window.frame:
-        ui.Button("Cook", clicked_fn=cookNode)
+        with ui.VStack(height=0, spacing=5):
+            with ui.HStack(spacing=8):
+                ui.Label("HDA File:",width=24)
+                widget = ui.StringField(width=ui.Fraction(1))
+                widget.model.add_end_edit_fn(lambda text: on_file_changed(text))
+                ui.Button("...", clicked_fn=on_pick_file, width=24)
+            treeview = ui.TreeView(
+                DynamicComboBoxModel(["aa","bb","cc"]),
+            #   delegate=delegate,
+                root_visible=False,
+                header_visible=False,
+                # name="TreeView",
+                # style_type_name_override="TreeView",
+            )                
+            ui.Button("Cook", clicked_fn=cookNode)
 
     while simulation_app.is_running():
         simulation_app.update()
