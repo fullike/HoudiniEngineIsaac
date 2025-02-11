@@ -272,24 +272,38 @@ class HoudiniEngineManager(object):
         node_info = hapi.getNodeInfo(self.session, node_id)
         parm_infos = hapi.getParameters(self.session, node_id, 0, node_info.parmCount)
         parms = dict()
+        
+        def get_parent(info):
+            path = []
+            while info.parentId != -1:
+                info = parm_infos[info.parentId]
+                path = [self.getString(info.nameSH)] + path
+            parent = parms
+            for name in path:
+                parent = parent[name]
+            return parent
+        
         for i in range(node_info.parmCount):
-            parm = parm_infos[i]
-            name = self.getString(parm.nameSH)
-            if parm.type == hapi.parmType.Int:
-                parms[name] = hapi.getParmIntValues(self.session, node_id, parm.intValuesIndex, parm.size) if parm.size > 1 else hapi.getParmIntValue(self.session, node_id, name, 0)
-            if parm.type == hapi.parmType.Toggle:
-                parms[name] = bool(hapi.getParmIntValues(self.session, node_id, parm.intValuesIndex, parm.size) if parm.size > 1 else hapi.getParmIntValue(self.session, node_id, name, 0)) 
+            info = parm_infos[i]
+            parent = get_parent(info)
+            name = self.getString(info.nameSH)
+            if info.type == hapi.parmType.Folder:
+                parent[name] = dict()
+            elif info.type == hapi.parmType.Int:
+                parent[name] = hapi.getParmIntValues(self.session, node_id, info.intValuesIndex, info.size) if info.size > 1 else hapi.getParmIntValue(self.session, node_id, name, 0)
+            elif info.type == hapi.parmType.Toggle:
+                parent[name] = bool(hapi.getParmIntValues(self.session, node_id, info.intValuesIndex, info.size) if info.size > 1 else hapi.getParmIntValue(self.session, node_id, name, 0)) 
             elif parm_infos[i].type == hapi.parmType.Float:
-                parms[name] = hapi.getParmFloatValues(self.session, node_id, parm.floatValuesIndex, parm.size) if parm.size > 1 else hapi.getParmFloatValue(self.session, node_id, name, 0)
+                parent[name] = hapi.getParmFloatValues(self.session, node_id, info.floatValuesIndex, info.size) if info.size > 1 else hapi.getParmFloatValue(self.session, node_id, name, 0)
             elif parm_infos[i].type == hapi.parmType.String:
-                if parm.size > 1:
-                    handles = hapi.getParmStringValues(self.session, node_id, True, parm.stringValuesIndex, parm.size) 
+                if info.size > 1:
+                    handles = hapi.getParmStringValues(self.session, node_id, True, info.stringValuesIndex, info.size) 
                     values = []
-                    for v in range(parm.size):
+                    for v in range(info.size):
                         values += self.getString(handles[v])
-                    parms[name] = values
+                    parent[name] = values
                 else:
-                    parms[name] = self.getString(hapi.getParmStringValue(self.session, node_id, name, 0, True))
+                    parent[name] = self.getString(hapi.getParmStringValue(self.session, node_id, name, 0, True))
         return parms
 
     def setParameters(self, node_id, parms):

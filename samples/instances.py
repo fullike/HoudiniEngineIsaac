@@ -11,7 +11,8 @@ simulation_app = SimulationApp({"headless": False})
 from isaacsim.core.api import World
 from isaacsim.core.prims import Articulation
 from isaacsim.core.utils.stage import add_reference_to_stage, open_stage
-
+from omni.kit.property.usd.custom_layout_helper import CustomLayoutFrame, CustomLayoutGroup, CustomLayoutProperty
+from omni.kit.widget.filebrowser import FileBrowserItem
 import omni.ui as ui
 import numpy as np
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, PhysxSchema
@@ -71,19 +72,7 @@ def main():
     if not he_manager.initializeHAPI(False):
         print("ERROR: Failed to initialize HAPI.")
         return
-    otl_path = "{}/hda/cabinet.hda".format(os.getcwd())
     def cookNode():
-        global num_env
-
-        node_id = he_manager.loadAsset(otl_path)
-        if node_id is None:
-            print("Failed to load the default HDA.")
-            return
-        parms = he_manager.getParameters(node_id)
-        print("Ready to set parameters")        
-        he_manager.setParameters(node_id, {"Width":1.5})
-        print("Ready to cook")
-        
         outputs = he_manager.cookNode(node_id)
     #   he_manager.getAttributes(outputs[0])
     #   he_manager.getAttributes(outputs[1])
@@ -178,8 +167,30 @@ def main():
     #   num_env +=1
 
         he_manager.unloadAsset(node_id)
-
-
+    def build_parms_ui(frame, parms):
+        with frame:
+            with ui.VStack(height=0, spacing=5):
+                for name, value in parms.items():
+                    if isinstance(value, int):
+                        with ui.HStack(spacing=8):
+                            ui.Label(name,width=24)
+                            widget = ui.IntField(width=ui.Fraction(1))
+                            widget.model.set_value(value)
+                            widget.model.add_end_edit_fn(lambda m, name=name:he_manager.setParameters(node_id, {name:m.as_int}))
+                    elif isinstance(value, float):
+                        with ui.HStack(spacing=8):
+                            ui.Label(name,width=24)
+                            widget = ui.FloatField(width=ui.Fraction(1))
+                            widget.model.set_value(value)
+                            widget.model.add_end_edit_fn(lambda m, name=name:he_manager.setParameters(node_id, {name:m.as_float}))
+                    elif isinstance(value, str):
+                        with ui.HStack(spacing=8):
+                            ui.Label(name,width=24)
+                            widget = ui.StringField(width=ui.Fraction(1))
+                            widget.model.set_value(value)
+                            widget.model.add_end_edit_fn(lambda m, name=name:he_manager.setParameters(node_id, {name:m.as_string}))         
+                    elif isinstance(value, dict):
+                        build_parms_ui(ui.CollapsableFrame(title=name), value)
     def on_file_changed(hda_path):
         global node_id
         node_id = he_manager.loadAsset(hda_path)
@@ -187,7 +198,16 @@ def main():
             print("Failed to load the default HDA.")
             return
         parms = he_manager.getParameters(node_id)
+        build_parms_ui(frame, parms)
+    def __menu_filter_files(item: FileBrowserItem) -> bool:
+        """Used by pick folder dialog to hide all the files"""
+        if not item or item.is_folder:
+            return True
+        return True
+
     def on_pick_file():
+        on_file_changed("{}/hda/cabinet.hda".format(os.getcwd()))
+        return
         from omni.kit.window.filepicker import FilePickerDialog
 
         # async def on_click_handler(filename: str, dirname: str, dialog: FilePickerDialog, click_fn: Callable):
@@ -206,8 +226,15 @@ def main():
             "Select HDA File",
             allow_multi_selection=False,
             apply_button_label="Select",
+            item_filter_fn=__menu_filter_files,
             click_apply_handler=lambda filename, dirname:on_apply(dialog, dirname, filename),
             click_cancel_handler=lambda filename, dirname: dialog.hide())
+        directory = "C:/Study/HoudiniEngineIsaac/"
+        dialog.set_current_directory(directory)
+        dialog.navigate_to(directory)
+        dialog.refresh_current_directory()
+        dialog.toggle_bookmark_from_path("Built In MJCF Files", directory, True)
+        dialog.show()          
     with my_window.frame:
         with ui.VStack(height=0, spacing=5):
             with ui.HStack(spacing=8):
@@ -215,14 +242,7 @@ def main():
                 widget = ui.StringField(width=ui.Fraction(1))
                 widget.model.add_end_edit_fn(lambda text: on_file_changed(text))
                 ui.Button("...", clicked_fn=on_pick_file, width=24)
-            treeview = ui.TreeView(
-                DynamicComboBoxModel(["aa","bb","cc"]),
-            #   delegate=delegate,
-                root_visible=False,
-                header_visible=False,
-                # name="TreeView",
-                # style_type_name_override="TreeView",
-            )                
+            frame = ui.CollapsableFrame(title="HDA Parameters")
             ui.Button("Cook", clicked_fn=cookNode)
 
     while simulation_app.is_running():
