@@ -1,9 +1,11 @@
 
 import os, sys
 # import Python Libs and add Path for the Dll Files 
-#sys.path.append("/opt/hfs20.5.445/houdini/python3.10libs")
-sys.path.append("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\houdini\\python3.10libs")
-os.add_dll_directory("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\bin")
+if sys.platform == 'linux':
+    sys.path.append("/opt/hfs20.5.445/houdini/python3.10libs")
+elif sys.platform == 'win32':
+    sys.path.append("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\houdini\\python3.10libs")
+    os.add_dll_directory("C:\\Program Files\\Side Effects Software\\Houdini 20.5.445\\bin")
 
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": False})
@@ -11,57 +13,18 @@ simulation_app = SimulationApp({"headless": False})
 from isaacsim.core.api import World
 from isaacsim.core.prims import Articulation
 from isaacsim.core.utils.stage import add_reference_to_stage, open_stage
-from omni.kit.property.usd.custom_layout_helper import CustomLayoutFrame, CustomLayoutGroup, CustomLayoutProperty
-from omni.kit.widget.filebrowser import FileBrowserItem
 import omni.ui as ui
 import numpy as np
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, PhysxSchema
+os.environ['HOUDINI_ASYNCIO'] = "0"
 import hou
 import hapi
 from hei.he_manager import HoudiniEngineManager
 
-class DynamicComboBoxItem(ui.AbstractItem):
-    def __init__(self, text):
-        super().__init__()
-        self.model = ui.SimpleStringModel(text)
-
-
-class DynamicComboBoxModel(ui.AbstractItemModel):
-    def __init__(self, args):
-        super().__init__()
-
-        self._current_index = ui.SimpleIntModel()
-        self._current_index.add_value_changed_fn(lambda a: self._item_changed(None))
-        self._items = []
-        for i in range(len(args)):
-            self._items.append(DynamicComboBoxItem(args[i]))
-
-    def get_item_children(self, item):
-        return self._items if item is None else []
-
-    def get_item_value_model_count(self, item):
-        """The number of columns"""
-        return 1
-
-    def get_item_value_model(self, item: ui.AbstractItem = None, column_id: int = 0):
-        if item is None:
-            return self._current_index
-        return item.model
-
-    def set_item_value_model(self, item: ui.AbstractItem = None, column_id: int = 0):
-        self._current_index = item
-        self._item_changed(None)
-        self._current_index.add_value_changed_fn(lambda a: self._item_changed(None))
-
-
-
-
-
-
 my_world = World(stage_units_in_meters=1.0)
 my_world.scene.add_default_ground_plane()
 
-my_window = ui.Window("My Extension's Window", width=400, height=400, dockPreference=ui.DockPreference.RIGHT_BOTTOM)
+my_window = ui.Window("HoudiniEngine", width=400, height=400, dockPreference=ui.DockPreference.RIGHT_BOTTOM)
 my_window.deferred_dock_in("Property", ui.DockPolicy.TARGET_WINDOW_IS_ACTIVE)
 num_env = 0
 def main():
@@ -165,8 +128,7 @@ def main():
     #   add_reference_to_stage(usd_name, f'/World/env_{num_env}')
     #   prim = Articulation(prim_path=f'/World/env_{num_env}', name="env", position=np.array([num_env*2, 0, 0.5]))
     #   num_env +=1
-
-        he_manager.unloadAsset(node_id)
+    #he_manager.unloadAsset(node_id)
     def build_parms_ui(frame, parms):
         with frame:
             with ui.VStack(height=0, spacing=5):
@@ -197,17 +159,12 @@ def main():
         if node_id is None:
             print("Failed to load the default HDA.")
             return
+        file_input.model.set_value(hda_path)
         parms = he_manager.getParameters(node_id)
         build_parms_ui(frame, parms)
-    def __menu_filter_files(item: FileBrowserItem) -> bool:
-        """Used by pick folder dialog to hide all the files"""
-        if not item or item.is_folder:
-            return True
-        return True
 
     def on_pick_file():
-        on_file_changed("{}/hda/cabinet.hda".format(os.getcwd()))
-        return
+        from omni.kit.widget.filebrowser import FileBrowserItem
         from omni.kit.window.filepicker import FilePickerDialog
 
         # async def on_click_handler(filename: str, dirname: str, dialog: FilePickerDialog, click_fn: Callable):
@@ -221,26 +178,31 @@ def main():
         def on_apply(dialog, dirname, filename):
             on_file_changed(dirname + filename)
             dialog.hide()
-
+        def on_filter_hda_files(item: FileBrowserItem) -> bool:
+            """Callback to filter the choices of file names in the open or save dialog"""
+            if not item or item.is_folder:
+                return True
+            # Show only files with listed extensions
+            return os.path.splitext(item.path)[1] == ".hda"
         dialog = FilePickerDialog(
             "Select HDA File",
             allow_multi_selection=False,
             apply_button_label="Select",
-            item_filter_fn=__menu_filter_files,
+            item_filter_options=["HDA Files (*.hda)"],
+            item_filter_fn=on_filter_hda_files,
             click_apply_handler=lambda filename, dirname:on_apply(dialog, dirname, filename),
             click_cancel_handler=lambda filename, dirname: dialog.hide())
-        directory = "C:/Study/HoudiniEngineIsaac/"
-        dialog.set_current_directory(directory)
-        dialog.navigate_to(directory)
+        dialog.set_current_directory(os.getcwd())
+        dialog.navigate_to(os.getcwd())
         dialog.refresh_current_directory()
-        dialog.toggle_bookmark_from_path("Built In MJCF Files", directory, True)
-        dialog.show()          
+    #    dialog.toggle_bookmark_from_path("Built In MJCF Files", directory, True)
+    #    dialog.show()          
     with my_window.frame:
         with ui.VStack(height=0, spacing=5):
             with ui.HStack(spacing=8):
                 ui.Label("HDA File:",width=24)
-                widget = ui.StringField(width=ui.Fraction(1))
-                widget.model.add_end_edit_fn(lambda text: on_file_changed(text))
+                file_input = ui.StringField(width=ui.Fraction(1))
+                file_input.model.add_end_edit_fn(lambda text: on_file_changed(text.as_string))
                 ui.Button("...", clicked_fn=on_pick_file, width=24)
             frame = ui.CollapsableFrame(title="HDA Parameters")
             ui.Button("Cook", clicked_fn=cookNode)
