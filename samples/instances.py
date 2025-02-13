@@ -21,9 +21,6 @@ import hou
 import hapi
 from hei.he_manager import HoudiniEngineManager
 
-my_world = World(stage_units_in_meters=1.0)
-my_world.scene.add_default_ground_plane()
-
 my_window = ui.Window("HoudiniEngine", width=400, height=400, dockPreference=ui.DockPreference.RIGHT_BOTTOM)
 my_window.deferred_dock_in("Property", ui.DockPolicy.TARGET_WINDOW_IS_ACTIVE)
 num_env = 0
@@ -166,35 +163,25 @@ def main():
     def on_pick_file():
         from omni.kit.widget.filebrowser import FileBrowserItem
         from omni.kit.window.filepicker import FilePickerDialog
-
-        # async def on_click_handler(filename: str, dirname: str, dialog: FilePickerDialog, click_fn: Callable):
-        #     dirname = dirname.strip()
-        #     if filename and dirname and not dirname.endswith("/"):
-        #         dirname += "/"
-        #     fullpath = f"{dirname}{filename}"
-        #     if click_fn:
-        #         click_fn(fullpath)
-        #     dialog.hide()
         def on_apply(dialog, dirname, filename):
             on_file_changed(dirname + filename)
             dialog.hide()
         def on_filter_hda_files(item: FileBrowserItem) -> bool:
-            """Callback to filter the choices of file names in the open or save dialog"""
-            if not item or item.is_folder:
-                return True
-            # Show only files with listed extensions
-            return os.path.splitext(item.path)[1] == ".hda"
+            return not item or os.path.splitext(item.path)[1] == ".hda"
+        def on_selection_changed(dialog, items: [FileBrowserItem] = []):
+            dialog._widget.file_bar.enable_apply_button(enable=os.path.splitext(items[-1].path)[1] == ".hda")            
         dialog = FilePickerDialog(
             "Select HDA File",
             allow_multi_selection=False,
             apply_button_label="Select",
             item_filter_options=["HDA Files (*.hda)"],
             item_filter_fn=on_filter_hda_files,
+            selection_changed_fn=lambda items:on_selection_changed(dialog, items),
             click_apply_handler=lambda filename, dirname:on_apply(dialog, dirname, filename),
             click_cancel_handler=lambda filename, dirname: dialog.hide())
-        dialog.set_current_directory(os.getcwd())
-        dialog.navigate_to(os.getcwd())
-        dialog.refresh_current_directory()
+    #    dialog.set_current_directory(os.getcwd())
+    #    dialog.navigate_to(os.getcwd())
+    #    dialog.refresh_current_directory()
     #    dialog.toggle_bookmark_from_path("Built In MJCF Files", directory, True)
     #    dialog.show()          
     with my_window.frame:
