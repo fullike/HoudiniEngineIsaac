@@ -318,104 +318,37 @@ class HoudiniEngineManager(object):
             elif isinstance(value, str):
                 hapi.setParmStringValue(self.session, node_id, value, parm_id, 0)
 
-    def getAttributes(self, node_id):
-        '''Query and list the point, vertex, prim and detail attributes of the given node'''
+    def getAttribute(self, owner, node_id, part_id, attr_name):
+        attr_info = hapi.getAttributeInfo(self.session, node_id, part_id, attr_name, owner,)
+        values = []
+        if attr_info.storage == hapi.storageType.Int:
+            for v in range(attr_info.count):
+                values +=[hapi.getAttributeIntData(self.session, node_id, part_id, attr_name, attr_info, -1, v, 1)]
+        elif attr_info.storage == hapi.storageType.IntArray:
+            data, counts = hapi.getAttributeIntArrayData(self.session, node_id, part_id, attr_name, attr_info, attr_info.totalArrayElements, 0, attr_info.count)
+            start = 0
+            for v in range(attr_info.count):
+                values +=[data[start:start+counts[v]]]
+                start +=counts[v]           
+        elif attr_info.storage == hapi.storageType.Float:
+            for v in range(attr_info.count):
+                values +=[hapi.getAttributeFloatData(self.session, node_id, part_id, attr_name, attr_info, -1, v, 1)]
+        elif attr_info.storage == hapi.storageType.String:
+            handles = hapi.getAttributeStringData(self.session, node_id, part_id, attr_name, attr_info, 0, attr_info.count) 
+            for v in range(attr_info.count):
+                values += [self.getString(handles[v])]
+        return values
+
+    def getAttributes(self, owner, node_id):
         part_id = 0
         part_info = hapi.getPartInfo(self.session, node_id, part_id)
-
-        vertex_attr_count = part_info.attributeCounts[hapi.attributeOwner.Vertex]
-        point_attr_count = part_info.attributeCounts[hapi.attributeOwner.Point]
-        prim_attr_count = part_info.attributeCounts[hapi.attributeOwner.Prim]
-        detail_attr_count = part_info.attributeCounts[hapi.attributeOwner.Detail]
-
-        print("\nAttributes: ")
-        print("==========")
-
-        # Point attributes
-        point_attr_nameSH = hapi.getAttributeNames(
-            self.session,
-            node_id, part_id,
-            hapi.attributeOwner.Point,
-            point_attr_count
-        )
-
-        print("\n  Point Attributes: {}".format(point_attr_count))
-        print("  ----------")
+        point_attr_count = part_info.attributeCounts[owner]
+        point_attr_nameSH = hapi.getAttributeNames(self.session, node_id, part_id, owner, point_attr_count)
+        attribs = dict()
         for i in range(point_attr_count):
             attr_name = self.getString(point_attr_nameSH[i])
-            print("  Name: {}".format(attr_name))
-
-            attr_info = hapi.getAttributeInfo(
-                self.session,
-                node_id, part_id,
-                attr_name,
-                hapi.attributeOwner.Point,
-            )
-            print("  Count: {} Storage type: {}".format(
-                attr_info.count, attr_info.storage))
-
-        # Vertex attributes
-        vertex_attr_nameSH = hapi.getAttributeNames(
-            self.session,
-            node_id,
-            part_id,
-            hapi.attributeOwner.Vertex,
-            vertex_attr_count
-        )
-
-        print("\n  Vertex Attributes: {}".format(vertex_attr_count))
-        print("  ----------")
-        for i in range(vertex_attr_count):
-            attr_name = self.getString(vertex_attr_nameSH[i])
-            print("  Name: {}".format(attr_name))
-
-            attr_info = hapi.getAttributeInfo(
-                self.session,
-                node_id, part_id,
-                attr_name,
-                hapi.attributeOwner.Vertex,
-            )
-            print("  Count: {} Storage type: {}".format(
-                attr_info.count, attr_info.storage))
-
-        # Primitive attributes
-        prim_attr_nameSH = hapi.getAttributeNames(
-            self.session,
-            node_id, part_id,
-            hapi.attributeOwner.Prim,
-            prim_attr_count
-        )
-
-        print("\n  Primitive Attributes: {}".format(prim_attr_count))
-        print("  ----------")
-        for i in range(prim_attr_count):
-            attr_name = self.getString(prim_attr_nameSH[i])
-            print("  Name: {}".format(attr_name))
-
-            attr_info = hapi.getAttributeInfo(
-                self.session,
-                node_id, part_id,
-                attr_name,
-                hapi.attributeOwner.Prim,
-            )
-            print("  Count: {} Storage type: {}".format(
-                attr_info.count, attr_info.storage))
-
-        # Detail attributes
-        detail_attr_nameSH = hapi.getAttributeNames(
-            self.session,
-            node_id, part_id,
-            hapi.attributeOwner.Detail,
-            detail_attr_count
-        )
-
-        print("\n  Detail Attributes: {}".format(detail_attr_count))
-        print("  ----------")
-        for i in range(detail_attr_count):
-            attr_name = self.getString(detail_attr_nameSH[i])
-            print("  {}".format(attr_name))
-
-        return True
+            attribs[attr_name] = self.getAttribute(owner, node_id, part_id, attr_name)
+        return attribs
 
     def readPoints(self, node_id):
         part_id = 0
@@ -455,67 +388,16 @@ class HoudiniEngineManager(object):
     def readGeometry(self, node_id):
         '''Read mesh data from Houdini for processing'''
         # Get mesh geo info.
-        print("\nGetting mesh geometry info:")
-        mesh_geo_info = hapi.getDisplayGeoInfo(self.session, node_id)
-
-        # Get mesh part info.
-        mesh_part_info = hapi.getPartInfo(self.session, mesh_geo_info.nodeId, 0)
-
-        # Get mesh face counts.
-        mesh_face_counts = hapi.getFaceCounts(
-            self.session,
-            mesh_geo_info.nodeId,
-            mesh_part_info.id,
-            0, mesh_part_info.faceCount
-        )
-        print("  Face count: {}".format(len(mesh_face_counts)))
-
-        # Get mesh vertex list.
-        mesh_vertex_list = hapi.getVertexList(
-            self.session,
-            mesh_geo_info.nodeId,
-            mesh_part_info.id,
-            0, mesh_part_info.vertexCount
-        )
-
-        print("  Vertex count: {}".format(len(mesh_vertex_list)))
-
-        # Fetch mesh attributes of the given name
-        def _fetchPointAttrib(owner, attrib_name):
-            mesh_attrib_info = hapi.getAttributeInfo(
-                self.session,
-                mesh_geo_info.nodeId,
-                mesh_part_info.id,
-                attrib_name, owner
-            )
-
-            mesh_attrib_data = hapi.getAttributeFloatData(
-                self.session,
-                mesh_geo_info.nodeId,
-                mesh_part_info.id,
-                attrib_name,
-                mesh_attrib_info, -1,
-                0, mesh_attrib_info.count
-            )
-
-            print("  {} attribute count: {}".format(
-                attrib_name, len(mesh_attrib_data)))
-            return mesh_attrib_data
-
-        mesh_p_attrib_info = _fetchPointAttrib(hapi.attributeOwner.Point, "P")
-
-        mesh_cd_attrib_data = _fetchPointAttrib(
-            hapi.attributeOwner.Point, "Cd")
-
-        mesh_N_attrib_data = _fetchPointAttrib(hapi.attributeOwner.Vertex, "N")
-
-    #   mesh_uv_attrib_data = _fetchPointAttrib(hapi.attributeOwner.Vertex, "uv")
-
-        # Now that you have all the required mesh data, you can now create
-        # a native mesh using your DCC/engine's dedicated functions:"
-        # ...
-
-        return mesh_p_attrib_info, mesh_vertex_list
+        meshes = []
+        geo_info = hapi.getGeoInfo(self.session, node_id)
+        for i in range(geo_info.partCount):
+            mesh = dict()
+            part_info = hapi.getPartInfo(self.session, geo_info.nodeId, i)
+            # Get mesh vertex list.
+            mesh['indices'] = hapi.getVertexList(self.session, geo_info.nodeId, part_info.id, 0, part_info.vertexCount)
+            mesh['P'] = self.getAttribute(hapi.attributeOwner.Point, node_id, part_info.id, "P")
+            meshes.append(mesh)
+        return meshes
 
     def getLastError(self):
         '''Helper method to retrieve the last error message'''

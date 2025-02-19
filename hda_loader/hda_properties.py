@@ -2,7 +2,7 @@
 
 import omni.ext
 import omni.kit.app
-from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, PhysxSchema
+from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdPhysics, Vt
 import omni.ui as ui
 from omni.physx.scripts import utils
 from omni.kit.property.usd.usd_property_widget import UsdPropertyUiEntry, UsdPropertiesWidget
@@ -21,20 +21,49 @@ import hou
 import hapi
 from hda_loader.houdini_engine import HoudiniEngineManager
 
+class HDAInstance:
+    pass
+
 class HDASchemaAttributesWidget(UsdPropertiesWidget):
     def __init__(self, *args, **kwargs):
         UsdPropertiesWidget.__init__(self, *args, **kwargs)
+        self.hda_instances = dict()
         self.he_manager = HoudiniEngineManager()
         if not self.he_manager.startSession(1, self.he_manager.DEFAULT_NAMED_PIPE, self.he_manager.DEFAULT_TCP_PORT):
             print("ERROR: Failed to create a Houdini Engine session.")
         if not self.he_manager.initializeHAPI(False):
-            print("ERROR: Failed to initialize HAPI.")        
+            print("ERROR: Failed to initialize HAPI.")
+
     def clean(self):
         self.he_manager.stopSession()
         UsdPropertiesWidget.clean(self)
 
-    def cookNode(self):
-        outputs = self.he_manager.cookNode(self.node_id)
+    @property
+    def current_prim_path(self):
+        return str(self._payload[-1])
+
+    @property
+    def current_hda_instance(self):
+        path = self._payload[-1]
+        if not self.hda_instances.__contains__(path):
+            self.hda_instances[path] = HDAInstance()
+        return self.hda_instances[path]
+
+    def build_meshes(self, stage, node_id):
+        meshes = self.he_manager.readGeometry(node_id)
+        for i, mesh in enumerate(meshes):
+            plane_mesh = UsdGeom.Mesh.Define(stage, f"/root/proc_mesh_{i}")
+            points_pxr = Vt.Vec3fArray(len(points) // 3)
+            indices_pxr = Vt.IntArray(len(indices))
+            for i in range(len(points) // 3):
+                points_pxr[i] = Gf.Vec3f(points[i*3+2], points[i*3], points[i*3+1])
+            plane_mesh.GetPointsAttr().Set(points_pxr)
+            plane_mesh.GetFaceVertexIndicesAttr().Set(indices)
+            plane_mesh.GetFaceVertexCountsAttr().Set([3] * (len(indices) // 3))
+
+    def build_instances(self):
+        instance = self.current_hda_instance        
+        outputs = self.he_manager.cookNode(instance.node_id)
     #   he_manager.getAttributes(outputs[0])
     #   he_manager.getAttributes(outputs[1])
 
@@ -44,7 +73,7 @@ class HDASchemaAttributesWidget(UsdPropertiesWidget):
         num_joints = len(joints["P"])
 
         # Create a tempory stage in memory
-        usd_name = 'cabinet.usda'
+        usd_name = self.current_prim_path.replace('/','.') + '.usd'
         stage = Usd.Stage.CreateInMemory(usd_name)
 
         # Enable physics
@@ -127,7 +156,29 @@ class HDASchemaAttributesWidget(UsdPropertiesWidget):
         current_prim = self._get_prim(self._payload[-1])
         current_prim.GetReferences().AddReference(usd_name)
 
+    def cookNode(self):
+        instance = self.current_hda_instance        
+        outputs = self.he_manager.cookNode(instance.node_id)
+        usd_name = self.current_prim_path.replace('/','.') + '.usda'
+        stage = Usd.Stage.CreateInMemory(usd_name)
+        root = stage.DefinePrim('/root', 'Xform')        
+        for i in range(len(outputs)):
+            attrs = self.he_manager.getAttributes(hapi.attributeOwner.Detail, outputs[i])
+            if attrs.__contains__("type"):
+                if attrs["type"][0] == "meshes":
+                    self.build_meshes(stage, outputs[i])
+                elif attrs["type"][0] == "instances":
+                    pass
+                elif attrs["type"][0] == "joints":
+                    pass
+        # Save the resulting layer
+        stage.GetRootLayer().defaultPrim = "root"
+        stage.GetRootLayer().Export(usd_name)
+        current_prim = self._get_prim(self._payload[-1])
+        current_prim.GetReferences().AddReference(usd_name)
+
     def build_parms_ui(self, frame, parms):
+        instance = self.current_hda_instance            
         with frame:
             with ui.VStack(height=0, spacing=5):
                 for name, value in parms.items():
@@ -136,30 +187,32 @@ class HDASchemaAttributesWidget(UsdPropertiesWidget):
                             ui.Label(name,width=24)
                             widget = ui.IntField(width=ui.Fraction(1))
                             widget.model.set_value(value)
-                            widget.model.add_end_edit_fn(lambda m, name=name:self.he_manager.setParameters(self.node_id, {name:m.as_int}))
+                            widget.model.add_end_edit_fn(lambda m, name=name:self.he_manager.setParameters(instance.node_id, {name:m.as_int}))
                     elif isinstance(value, float):
                         with ui.HStack(spacing=8):
                             ui.Label(name,width=24)
                             widget = ui.FloatField(width=ui.Fraction(1))
                             widget.model.set_value(value)
-                            widget.model.add_end_edit_fn(lambda m, name=name:self.he_manager.setParameters(self.node_id, {name:m.as_float}))
+                            widget.model.add_end_edit_fn(lambda m, name=name:self.he_manager.setParameters(instance.node_id, {name:m.as_float}))
                     elif isinstance(value, str):
                         with ui.HStack(spacing=8):
                             ui.Label(name,width=24)
                             widget = ui.StringField(width=ui.Fraction(1))
                             widget.model.set_value(value)
-                            widget.model.add_end_edit_fn(lambda m, name=name:self.he_manager.setParameters(self.node_id, {name:m.as_string}))         
+                            widget.model.add_end_edit_fn(lambda m, name=name:self.he_manager.setParameters(instance.node_id, {name:m.as_string}))         
                     elif isinstance(value, dict):
                         self.build_parms_ui(ui.CollapsableFrame(title=name), value)
 
     def on_file_changed(self, hda_path):
-        self.node_id = self.he_manager.loadAsset(hda_path)
-        if self.node_id is None:
+        instance = self.current_hda_instance
+        instance.hda_path = hda_path
+        instance.node_id = self.he_manager.loadAsset(hda_path)
+        if instance.node_id is None:
             print("Failed to load the default HDA.")
             return
+        instance.hda_parms = self.he_manager.getParameters(instance.node_id)
         self.file_input.model.set_value(hda_path)
-        parms = self.he_manager.getParameters(self.node_id)
-        self.build_parms_ui(self.frame, parms)
+        self.build_parms_ui(self.frame, instance.hda_parms)
 
     def on_pick_file(self):
         from omni.kit.widget.filebrowser import FileBrowserItem
@@ -185,16 +238,20 @@ class HDASchemaAttributesWidget(UsdPropertiesWidget):
         dialog.refresh_current_directory()
         
     def _customize_props_layout(self, attrs):
-        print(attrs)
+        instance = self.current_hda_instance
         frame = CustomLayoutFrame(hide_extra=False)
         with frame:
             with ui.VStack(height=0, spacing=5):
                 with ui.HStack(spacing=8):
                     ui.Label("HDA File:",width=24)
                     self.file_input = ui.StringField(width=ui.Fraction(1))
-                    self.file_input.model.add_end_edit_fn(lambda text: self.on_file_changed(text.as_string))
+                #   self.file_input.model.add_end_edit_fn(lambda text: self.on_file_changed(text.as_string))
+                    if hasattr(instance, "hda_path"):
+                        self.file_input.model.set_value(instance.hda_path)
                     ui.Button("...", clicked_fn=self.on_pick_file, width=24)
                 self.frame = ui.CollapsableFrame(title="HDA Parameters")
+                if hasattr(instance, "hda_parms"):
+                    self.build_parms_ui(self.frame, instance.hda_parms)
                 ui.Button("Cook", clicked_fn=self.cookNode)
         return []       
     #   return frame.apply(attrs)
