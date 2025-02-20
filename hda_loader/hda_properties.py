@@ -2,8 +2,9 @@
 
 import omni.ext
 import omni.kit.app
-from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdPhysics, Vt
+from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade, Vt
 import omni.ui as ui
+import omni.kit.material.library as mat_lib
 from omni.physx.scripts import utils
 from omni.kit.property.usd.usd_property_widget import UsdPropertyUiEntry, UsdPropertiesWidget
 from omni.kit.property.usd.custom_layout_helper import CustomLayoutFrame, CustomLayoutProperty
@@ -52,14 +53,33 @@ class HDASchemaAttributesWidget(UsdPropertiesWidget):
     def build_meshes(self, stage, node_id):
         meshes = self.he_manager.readGeometry(node_id)
         for i, mesh in enumerate(meshes):
-            plane_mesh = UsdGeom.Mesh.Define(stage, f"/root/proc_mesh_{i}")
-            points_pxr = Vt.Vec3fArray(len(points) // 3)
+            points = mesh["P"]
+            indices = mesh["indices"]
+            prim = stage.DefinePrim(f'/root/prim_{i}', 'Xform')  
+            plane_mesh = UsdGeom.Mesh.Define(stage, f"/root/prim_{i}/mesh")
+            points_pxr = Vt.Vec3fArray(len(points))
             indices_pxr = Vt.IntArray(len(indices))
-            for i in range(len(points) // 3):
-                points_pxr[i] = Gf.Vec3f(points[i*3+2], points[i*3], points[i*3+1])
+            for j in range(len(points)):
+                points_pxr[j] = Gf.Vec3f(points[j][2], points[j][0], points[j][1])
             plane_mesh.GetPointsAttr().Set(points_pxr)
             plane_mesh.GetFaceVertexIndicesAttr().Set(indices)
             plane_mesh.GetFaceVertexCountsAttr().Set([3] * (len(indices) // 3))
+
+
+            on_mat = lambda mat_prim: UsdShade.MaterialBindingAPI(prim).Bind(
+                UsdShade.Material(mat_prim), UsdShade.Tokens.weakerThanDescendants
+            )
+
+
+            mtl_path = f'/root/prim_{i}/material'
+            material = stage.DefinePrim(mtl_path, "Material")
+            # Check that there isn't already a material on the target. Might need a better way to check this.
+
+            mdl_file = "D:/issac-sim-assets/Assets/Isaac/4.5/Isaac/Environments/Simple_Warehouse/Materials/MI_WallB_01.mdl"
+            omni.kit.commands.execute("CreateMdlMaterialPrim", mtl_url=mdl_file, mtl_name="PBR", mtl_path=mtl_path,stage=stage)
+
+
+
 
     def build_instances(self):
         instance = self.current_hda_instance        
@@ -163,7 +183,7 @@ class HDASchemaAttributesWidget(UsdPropertiesWidget):
         stage = Usd.Stage.CreateInMemory(usd_name)
         root = stage.DefinePrim('/root', 'Xform')        
         for i in range(len(outputs)):
-            attrs = self.he_manager.getAttributes(hapi.attributeOwner.Detail, outputs[i])
+            attrs = self.he_manager.getAttributes(hapi.attributeOwner.Detail, outputs[i], 0)
             if attrs.__contains__("type"):
                 if attrs["type"][0] == "meshes":
                     self.build_meshes(stage, outputs[i])

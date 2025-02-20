@@ -339,8 +339,7 @@ class HoudiniEngineManager(object):
                 values += [self.getString(handles[v])]
         return values
 
-    def getAttributes(self, owner, node_id):
-        part_id = 0
+    def getAttributes(self, owner, node_id, part_id):
         part_info = hapi.getPartInfo(self.session, node_id, part_id)
         point_attr_count = part_info.attributeCounts[owner]
         point_attr_nameSH = hapi.getAttributeNames(self.session, node_id, part_id, owner, point_attr_count)
@@ -391,12 +390,17 @@ class HoudiniEngineManager(object):
         meshes = []
         geo_info = hapi.getGeoInfo(self.session, node_id)
         for i in range(geo_info.partCount):
-            mesh = dict()
             part_info = hapi.getPartInfo(self.session, geo_info.nodeId, i)
-            # Get mesh vertex list.
-            mesh['indices'] = hapi.getVertexList(self.session, geo_info.nodeId, part_info.id, 0, part_info.vertexCount)
-            mesh['P'] = self.getAttribute(hapi.attributeOwner.Point, node_id, part_info.id, "P")
-            meshes.append(mesh)
+            if part_info.isInstanced:
+                mesh = dict()
+                mesh['pos'] = part_attrs['P']
+                mesh['indices'] = hapi.getVertexList(self.session, geo_info.nodeId, part_info.id, 0, part_info.vertexCount)
+                mesh['P'] = self.getAttribute(hapi.attributeOwner.Point, node_id, part_info.id, "P")
+                mesh['name'] = self.getAttribute(hapi.attributeOwner.Prim, node_id, part_info.id, "name")
+                mesh['material'] = self.getAttribute(hapi.attributeOwner.Prim, node_id, part_info.id, "material")
+                meshes.append(mesh)
+            else:
+                part_attrs = self.getAttributes(hapi.attributeOwner.Prim, node_id, part_info.id)
         return meshes
 
     def getLastError(self):
